@@ -1,0 +1,812 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Zoho AI Assistant API",
+    "description": "REST API for Zoho CRM lead retrieval, OAuth management, and OpenAI-powered lead analysis.\r\n\r\n## OpenAI Endpoints\r\n\r\nConfigure `OpenAI:ApiKey` and `OpenAI:Model` in appsettings.json, then:\r\n\r\n| Endpoint | Description |\r\n|----------|-------------|\r\n| `POST /api/ai/analyze-lead/{leadId}` | Full analysis: summary, next action, email draft, quality score |\r\n| `POST /api/ai/generate-email/{leadId}` | Professional follow-up email only |\r\n| `POST /api/ai/generate-summary/{leadId}` | Lead summary only |\r\n\r\n## Complete OAuth Workflow\r\n\r\nFollow these steps in order to authenticate with Zoho CRM via Swagger:\r\n\r\n| Step | Action | Endpoint |\r\n|------|--------|----------|\r\n| **1** | Generate the Zoho authorization URL | `GET /api/oauth/authorize` |\r\n| **2** | Open `authorizationUrl` in a browser and sign in to Zoho | *(browser)* |\r\n| **3** | After consent, copy the `code` parameter from the redirect URL | *(browser redirect)* |\r\n| **4** | Exchange the code for access + refresh tokens | `GET /api/oauth/callback?code={code}` |\r\n| **5** | Verify tokens are stored (refresh token saved to `Data/zoho-tokens.json`) | `GET /api/oauth/tokens` |\r\n| **6** | Test lead retrieval | `GET /api/leads/test` |\r\n\r\n### Optional steps\r\n\r\n- **Manual refresh:** `POST /api/oauth/refresh` — forces a new access token.\r\n- **Health check:** `GET /api/health/zoho` — verifies OAuth + CRM connectivity.\r\n- **Full leads list:** `GET /api/leads` — returns the first page of all leads.\r\n\r\n### Prerequisites\r\n\r\n1. Set `Zoho:ClientId` and `Zoho:ClientSecret` in `appsettings.json`.\r\n2. Register redirect URI `http://localhost:5000/api/oauth/callback` in the [Zoho API Console](https://api-console.zoho.in/).\r\n3. Run the app on port 5000 (`dotnet run`).\r\n\r\n### Automatic token refresh\r\n\r\nAccess tokens expire after ~1 hour. All CRM endpoints automatically refresh the token\r\nusing the stored refresh token when needed. Failed requests due to 401 are retried once.",
+    "version": "v1"
+  },
+  "paths": {
+    "/api/AI/analyze-lead/{leadId}": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Analyzes a Zoho CRM lead using OpenAI and returns structured JSON insights.",
+        "description": "**Workflow**\r\n            \r\n1. Fetches the lead from Zoho CRM (all fields + related Notes).\r\n2. Extracts Lead Name, Company, Email, Phone, Description, and Notes.\r\n3. Sends the context to OpenAI with a structured analysis prompt.\r\n4. Returns JSON containing summary, next action, email draft, and quality score.\r\n            \r\n**Example response**\r\n```json\r\n{\r\n  \"leadId\": \"123456789\",\r\n  \"leadName\": \"Jane Doe\",\r\n  \"company\": \"Acme Corp\",\r\n  \"leadSummary\": \"...\",\r\n  \"recommendedNextAction\": \"...\",\r\n  \"followUpEmailDraft\": \"...\",\r\n  \"leadQualityScore\": 82,\r\n  \"model\": \"gpt-4o-mini\"\r\n}\r\n```\r\n            \r\nConfigure `OpenAI:ApiKey` and `OpenAI:Model` in appsettings.json before calling.",
+        "parameters": [
+          {
+            "name": "leadId",
+            "in": "path",
+            "description": "Zoho CRM Lead record ID.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Optional additional context for the AI prompt.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeadAnalysisRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeadAnalysisRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeadAnalysisRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Lead analysis generated successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadAnalysisResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Lead not found in Zoho CRM.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "OpenAI API key missing from configuration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "OpenAI or Zoho API returned an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/AI/generate-email/{leadId}": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Generates a professional sales follow-up email for a Zoho CRM lead.",
+        "description": "Fetches lead context from Zoho CRM and returns only the email draft.\r\n            \r\n**Example response**\r\n```json\r\n{\r\n  \"leadId\": \"123456789\",\r\n  \"leadName\": \"Jane Doe\",\r\n  \"emailDraft\": \"Subject: Following up on our conversation...\",\r\n  \"model\": \"gpt-4o-mini\"\r\n}\r\n```",
+        "parameters": [
+          {
+            "name": "leadId",
+            "in": "path",
+            "description": "Zoho CRM Lead record ID.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Optional additional context for the AI prompt.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeadAnalysisRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeadAnalysisRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeadAnalysisRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Email draft generated successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadEmailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Lead not found in Zoho CRM.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "OpenAI or Zoho API returned an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/AI/generate-summary/{leadId}": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Generates a concise AI summary for a Zoho CRM lead.",
+        "description": "Fetches lead context from Zoho CRM and returns only the summary text.\r\n            \r\n**Example response**\r\n```json\r\n{\r\n  \"leadId\": \"123456789\",\r\n  \"leadName\": \"Jane Doe\",\r\n  \"summary\": \"High-intent inbound lead from Acme Corp...\",\r\n  \"model\": \"gpt-4o-mini\"\r\n}\r\n```",
+        "parameters": [
+          {
+            "name": "leadId",
+            "in": "path",
+            "description": "Zoho CRM Lead record ID.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Optional additional context for the AI prompt.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeadAnalysisRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeadAnalysisRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeadAnalysisRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Summary generated successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadSummaryResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Lead not found in Zoho CRM.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "OpenAI or Zoho API returned an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/Health/zoho": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Verifies Zoho OAuth and CRM API connectivity.",
+        "description": "Performs a live check:\r\n1. Obtains a valid access token (auto-refreshes if expired).\r\n2. Calls `GET /crm/v7/Leads?per_page=1` on Zoho CRM.\r\n3. Returns success or failure with diagnostic details.\r\n            \r\nExample success response:\r\n```json\r\n{\r\n  \"success\": true,\r\n  \"message\": \"Zoho OAuth and CRM API are working correctly.\",\r\n  \"accessTokenGenerated\": true,\r\n  \"crmApiReachable\": true,\r\n  \"httpStatusCode\": 200,\r\n  \"checkedAtUtc\": \"2026-06-11T10:00:00+00:00\"\r\n}\r\n```",
+        "responses": {
+          "200": {
+            "description": "Health check completed (inspect `success` field for pass/fail).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZohoHealthCheckDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/Leads/test": {
+      "get": {
+        "tags": [
+          "Leads"
+        ],
+        "summary": "Step 6 — Returns the first 5 leads from Zoho CRM (quick test after OAuth).",
+        "description": "**OAuth Workflow — Step 6**\r\n            \r\nAfter completing OAuth and storing the refresh token, call this endpoint to verify\r\nlead retrieval. Returns at most 5 leads. Access tokens are refreshed automatically\r\nif expired.\r\n            \r\nExample response:\r\n```json\r\n{\r\n  \"leads\": [\r\n    { \"id\": \"123456789\", \"firstName\": \"Jane\", \"lastName\": \"Doe\", \"email\": \"jane@example.com\" }\r\n  ],\r\n  \"count\": 5,\r\n  \"page\": 1,\r\n  \"perPage\": 5,\r\n  \"moreRecords\": true\r\n}\r\n```",
+        "responses": {
+          "200": {
+            "description": "First 5 leads returned successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZohoLeadListResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "OAuth not configured — complete the OAuth flow first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Zoho CRM API returned an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/Leads": {
+      "get": {
+        "tags": [
+          "Leads"
+        ],
+        "summary": "Returns all leads from Zoho CRM (first page).",
+        "description": "Retrieves the first page of leads. Access tokens are refreshed automatically when expired.",
+        "responses": {
+          "200": {
+            "description": "Leads returned successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZohoLeadListResponseDto"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Zoho CRM API returned an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/Leads/{id}": {
+      "get": {
+        "tags": [
+          "Leads"
+        ],
+        "summary": "Returns a single lead by Zoho record ID.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Zoho CRM Lead record ID (numeric string).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lead found and returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": { },
+                  "description": "A Zoho Lead record with all CRM fields returned as a flat key/value map (Zoho API names)."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Lead not found in Zoho CRM.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Zoho CRM API returned an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/OAuth/authorize": {
+      "get": {
+        "tags": [
+          "OAuth"
+        ],
+        "summary": "Step 1 — Generate the Zoho OAuth authorization URL.",
+        "description": "**OAuth Workflow — Step 1**\r\n            \r\nCall this endpoint to receive a Zoho authorization URL. Open the `authorizationUrl`\r\nvalue in a browser, sign in to Zoho, and approve access.\r\n            \r\nExample response:\r\n```json\r\n{\r\n  \"authorizationUrl\": \"https://accounts.zoho.in/oauth/v2/auth?scope=...\",\r\n  \"redirectUri\": \"http://localhost:5000/api/oauth/callback\",\r\n  \"scopes\": \"ZohoCRM.modules.leads.READ,...\",\r\n  \"instructions\": \"Open AuthorizationUrl in a browser...\"\r\n}\r\n```",
+        "responses": {
+          "200": {
+            "description": "Authorization URL generated successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthAuthorizeResponseDto"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Client ID or Client Secret is missing from configuration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/OAuth/callback": {
+      "get": {
+        "tags": [
+          "OAuth"
+        ],
+        "summary": "Step 4 — Exchange the authorization code for access and refresh tokens.",
+        "description": "**OAuth Workflow — Step 4**\r\n            \r\nAfter signing in to Zoho (Step 2), the browser is redirected to the callback URL with a\r\n`code` query parameter (Step 3). Pass that code here to obtain and store tokens.\r\n            \r\nExample callback URL from the browser:\r\n```\r\nhttp://localhost:5000/api/oauth/callback?code=1000.abc123.xyz&location=in\r\n```\r\n            \r\nExample request:\r\n```\r\nGET /api/oauth/callback?code=1000.abc123.xyz\r\n```\r\n            \r\nOn success, the refresh token is saved to `Data/zoho-tokens.json` (Step 5).",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "description": "Authorization code from the Zoho redirect URL (expires in ~60 seconds).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tokens exchanged and stored successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthCallbackResultDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Authorization code is missing or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Zoho token endpoint returned an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/OAuth/tokens": {
+      "get": {
+        "tags": [
+          "OAuth"
+        ],
+        "summary": "Returns the current OAuth token status (access token, refresh token, expiry).",
+        "description": "Example response:\r\n```json\r\n{\r\n  \"accessToken\": \"1000.xxxxx\",\r\n  \"refreshToken\": \"1000.yyyyy\",\r\n  \"expiresAtUtc\": \"2026-06-11T12:00:00+00:00\",\r\n  \"isAccessTokenValid\": true,\r\n  \"hasRefreshToken\": true,\r\n  \"message\": \"Access token is valid.\"\r\n}\r\n```",
+        "responses": {
+          "200": {
+            "description": "Current token status returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZohoTokenStatusDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/OAuth/refresh": {
+      "post": {
+        "tags": [
+          "OAuth"
+        ],
+        "summary": "Step 5 — Force-refresh the access token using the stored refresh token.",
+        "description": "**OAuth Workflow — Step 5 (optional manual refresh)**\r\n            \r\nGenerates a new access token from the stored refresh token. The Leads API also refreshes\r\nautomatically when the access token expires.\r\n            \r\nExample response:\r\n```json\r\n{\r\n  \"accessToken\": \"1000.newtoken\",\r\n  \"refreshToken\": \"1000.yyyyy\",\r\n  \"expiresAtUtc\": \"2026-06-11T13:00:00+00:00\",\r\n  \"isAccessTokenValid\": true,\r\n  \"hasRefreshToken\": true,\r\n  \"message\": \"Access token is valid.\"\r\n}\r\n```",
+        "responses": {
+          "200": {
+            "description": "Access token refreshed successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZohoTokenStatusDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No refresh token available — complete OAuth flow first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Zoho token endpoint returned an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "LeadAnalysisRequest": {
+        "type": "object",
+        "properties": {
+          "additionalContext": {
+            "type": "string",
+            "description": "Extra instructions or context appended to the AI prompt.",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false,
+        "description": "Optional input for AI lead analysis endpoints."
+      },
+      "LeadAnalysisResponse": {
+        "type": "object",
+        "properties": {
+          "leadId": {
+            "type": "string",
+            "nullable": true
+          },
+          "leadName": {
+            "type": "string",
+            "nullable": true
+          },
+          "company": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "leadSummary": {
+            "type": "string",
+            "nullable": true
+          },
+          "recommendedNextAction": {
+            "type": "string",
+            "nullable": true
+          },
+          "followUpEmailDraft": {
+            "type": "string",
+            "nullable": true
+          },
+          "leadQualityScore": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "model": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false,
+        "description": "Structured AI analysis returned by POST /api/ai/analyze-lead/{leadId}."
+      },
+      "LeadEmailResponse": {
+        "type": "object",
+        "properties": {
+          "leadId": {
+            "type": "string",
+            "nullable": true
+          },
+          "leadName": {
+            "type": "string",
+            "nullable": true
+          },
+          "emailDraft": {
+            "type": "string",
+            "nullable": true
+          },
+          "model": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false,
+        "description": "Response from POST /api/ai/generate-email/{leadId}."
+      },
+      "LeadSummaryResponse": {
+        "type": "object",
+        "properties": {
+          "leadId": {
+            "type": "string",
+            "nullable": true
+          },
+          "leadName": {
+            "type": "string",
+            "nullable": true
+          },
+          "summary": {
+            "type": "string",
+            "nullable": true
+          },
+          "model": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false,
+        "description": "Response from POST /api/ai/generate-summary/{leadId}."
+      },
+      "OAuthAuthorizeResponseDto": {
+        "type": "object",
+        "properties": {
+          "authorizationUrl": {
+            "type": "string",
+            "description": "Full Zoho authorization URL — open in a browser to sign in.",
+            "nullable": true
+          },
+          "instructions": {
+            "type": "string",
+            "description": "Human-readable next steps for the OAuth workflow.",
+            "nullable": true
+          },
+          "redirectUri": {
+            "type": "string",
+            "description": "Redirect URI embedded in the authorization URL (must match Zoho client settings).",
+            "nullable": true
+          },
+          "scopes": {
+            "type": "string",
+            "description": "OAuth scopes requested during authorization.",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false,
+        "description": "Response returned by GET /api/oauth/authorize."
+      },
+      "OAuthCallbackResultDto": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string",
+            "nullable": true
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/ZohoTokenStatusDto"
+          }
+        },
+        "additionalProperties": false,
+        "description": "Result of GET /api/oauth/callback after exchanging the authorization code."
+      },
+      "ProblemDetails": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "nullable": true
+          },
+          "title": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "detail": {
+            "type": "string",
+            "nullable": true
+          },
+          "instance": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": { }
+      },
+      "ZohoHealthCheckDto": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string",
+            "nullable": true
+          },
+          "accessTokenGenerated": {
+            "type": "boolean"
+          },
+          "crmApiReachable": {
+            "type": "boolean"
+          },
+          "httpStatusCode": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "checkedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false,
+        "description": "Result of GET /api/health/zoho connectivity check."
+      },
+      "ZohoLeadListResponseDto": {
+        "type": "object",
+        "properties": {
+          "leads": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": { },
+              "description": "A Zoho Lead record with all CRM fields returned as a flat key/value map (Zoho API names)."
+            },
+            "nullable": true
+          },
+          "count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "perPage": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "moreRecords": {
+            "type": "boolean"
+          },
+          "fieldBatchCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalFieldCount": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false,
+        "description": "Paginated list response returned by GET /api/leads."
+      },
+      "ZohoTokenStatusDto": {
+        "type": "object",
+        "properties": {
+          "accessToken": {
+            "type": "string",
+            "nullable": true
+          },
+          "refreshToken": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAtUtc": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "isAccessTokenValid": {
+            "type": "boolean"
+          },
+          "hasRefreshToken": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false,
+        "description": "Token status returned by GET /api/oauth/tokens and POST /api/oauth/refresh."
+      }
+    }
+  }
+}
